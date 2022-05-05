@@ -26,13 +26,96 @@ from detic.predictor import VisualizationDemo
 class ScreenGrab:
     def __init__(self):
         self.sct = mss.mss()
-        m0 = self.sct.monitors[0]
-        self.monitor = {'top': 0, 'left': 0, 'width': m0['width'] / 2, 'height': m0['height'] / 2}
+        mon = 1
+        m0 = self.sct.monitors[mon]
+        print("Screen:", m0)
+        print("Screens:", self.sct.monitors)
+        self.monitor = {'top': 0, 'left': 0, 'width': m0['width'] * 0.7, 'height': m0['height'] * 0.7, 'mon': mon}
 
     def read(self):
         img =  np.array(self.sct.grab(self.monitor))
         nf = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
         return (True, nf)
+
+    def isOpened(self):
+        return True
+    def release(self):
+        return True
+
+# Experimental MQTT support
+import json
+from threading import Condition
+import paho.mqtt.client as mqtt
+import base64
+
+class MQTTImageInput(mqtt.Client):
+
+    def __init__(self, topic, replyTopic, id = None):
+        if (id == None):
+            super().__init__()
+        else:
+            super().__init__(id)
+        self.frame = None
+        self.imgdata = None
+        self.topic = topic
+        self.replyTopic = replyTopic
+        self.imgget = Condition()
+
+    def set_frame(self, frame, imgdata, topic):
+        self.frame = frame
+        self.imgdata = imgdata
+        self.msgtopic = topic
+        self.imgget.acquire()
+        self.imgget.notify()
+        self.imgget.release()
+
+
+    def on_connect(self, mqttc, obj, flags, rc):
+        if rc == 0:
+            self.subscribe(self.topic, 0)
+            print("Connected to broker:", rc)
+        else:
+            print("Connection failed: ", rc)
+
+    def on_message(self, mqttc, obj, message):
+        print(message.topic + " " + str(message.qos))
+        imgdata = json.loads(message.payload)
+        b64img = imgdata['image']
+        img = base64.b64decode(b64img)
+        nparr = np.frombuffer(img, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        self.set_frame(frame, imgdata, message.topic)
+        self.process_image()
+
+    def on_publish(self, mqttc, obj, mid):
+        print("mid: "+str(mid))
+
+    def on_subscribe(self, mqttc, obj, mid, granted_qos):
+        print("Subscribed: " + str(mid) + " " + str(granted_qos) + " " + str(obj))
+
+    def on_log(self, mqttc, obj, level, string):
+        print(string)
+
+    # Should add detections also! (JSON for detections)
+    def publish_image(self, frame):
+        h, w = frame.shape[:2]
+        img = cv2.imencode('.png', frame)[1].tostring()
+        encoded_img = base64.b64encode(img).decode("utf-8")
+        jsimg = { "height": h, "witdth": w, "image": encoded_img}
+        print(json.dumps(jsimg))
+        self.publish(self.replyTopic, json.dumps(jsimg))
+
+    # show the image.
+    def process_image(self):
+        # No processing here - just forwarding...
+        self.procframe = self.frame
+        self.publish_image(self.procframe)
+
+    def read(self):
+        self.imgget.acquire()
+        self.imgget.wait()
+        self.imgget.release()
+        return (True, self.frame)
 
     def isOpened(self):
         return True
@@ -175,6 +258,10 @@ if __name__ == "__main__":
         assert args.output is None, "output not yet supported with --webcam!"
         if args.webcam == "screen":
             cam = ScreenGrab()
+        elif args.webcam == "mqtt":
+            cam = MQTTImageInput("ha/camera/mqtt_json", "detic/image/detections")
+            cam.connect("localhost")
+            cam.loop_start()
         else:
             cam = cv2.VideoCapture(int(args.webcam))
         for vis in tqdm.tqdm(demo.run_on_video(cam)):
