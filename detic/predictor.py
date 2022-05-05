@@ -9,6 +9,7 @@ import torch
 from detectron2.data import MetadataCatalog
 from detectron2.engine.defaults import DefaultPredictor
 from detectron2.utils.video_visualizer import VideoVisualizer
+from detectron2.utils.visualizer import _create_text_labels
 from detectron2.utils.visualizer import ColorMode, Visualizer
 
 from .modeling.utils import reset_cls_test
@@ -120,6 +121,7 @@ class VisualizationDemo(object):
         video_visualizer = VideoVisualizer(self.metadata, self.instance_mode)
 
         def process_predictions(frame, predictions):
+            print(predictions)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             if "panoptic_seg" in predictions:
                 panoptic_seg, segments_info = predictions["panoptic_seg"]
@@ -129,6 +131,11 @@ class VisualizationDemo(object):
             elif "instances" in predictions:
                 predictions = predictions["instances"].to(self.cpu_device)
                 vis_frame = video_visualizer.draw_instance_predictions(frame, predictions)
+                classes = predictions.pred_classes.tolist() if predictions.has("pred_classes") else None
+                scores = predictions.scores if predictions.has("scores") else None
+                labels = _create_text_labels(classes, None, self.metadata.get("thing_classes", None))
+                print(labels, scores)
+
             elif "sem_seg" in predictions:
                 vis_frame = video_visualizer.draw_sem_seg(
                     frame, predictions["sem_seg"].argmax(dim=0).to(self.cpu_device)

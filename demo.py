@@ -102,14 +102,13 @@ class MQTTImageInput(mqtt.Client):
         img = cv2.imencode('.png', frame)[1].tostring()
         encoded_img = base64.b64encode(img).decode("utf-8")
         jsimg = { "height": h, "witdth": w, "image": encoded_img}
-        print(json.dumps(jsimg))
         self.publish(self.replyTopic, json.dumps(jsimg))
 
     # show the image.
     def process_image(self):
         # No processing here - just forwarding...
         self.procframe = self.frame
-        self.publish_image(self.procframe)
+        #self.publish_image(self.procframe)
 
     def read(self):
         self.imgget.acquire()
